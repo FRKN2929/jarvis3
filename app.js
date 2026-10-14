@@ -28,11 +28,20 @@ function setBrainChip() {
   $('engineInfo').textContent = brain.ready ? `Aktiv: ${brain.model} (${brain.kind === 'webgpu' ? 'iPhone-GPU' : 'CPU'})` : (Brain.hasWebGPU() ? 'WebGPU verfügbar – schnell.' : (window.isSecureContext ? 'Kein WebGPU – CPU-Modus (langsamer). iOS 26 nutzt die GPU.' : 'Für das Gehirn wird HTTPS benötigt (Tailscale) – siehe README.'));
   renderOnboarding();
 }
+let loading = false;
+function showProgress(p, txt) {
+  const pct = `${Math.max(2, Math.round(p * 100))}%`;
+  $('progBar').style.width = pct; $('progTxt').textContent = txt.slice(0, 120);
+  const ob = $('obProg'); if (ob) { ob.style.width = pct; $('obTxt').textContent = txt.slice(0, 120); }
+}
 async function loadBrain() {
-  if (brain.ready) return;
+  if (brain.ready || loading) return;
+  loading = true;
   $('loadBrain').disabled = true;
+  const ob = $('obLoad'); if (ob) { ob.disabled = true; ob.textContent = 'Lädt … bitte App offen lassen'; }
+  showProgress(0.01, 'Starte …');
   try {
-    try { await navigator.storage?.persist?.(); } catch (e) {}
+    try { await Promise.race([navigator.storage?.persist?.(), new Promise((r) => setTimeout(r, 1500))]); } catch (e) {}
     if (params.get('engine') === 'mock') {
       brain.engine = { mock: true }; brain.kind = 'webgpu'; brain.model = 'mock';
       // test brain (no download): echoes chat, returns well-formed content for the generators
@@ -50,23 +59,31 @@ async function loadBrain() {
         let s = ''; for (const w of t.split(' ')) { s += w + ' '; onDelta(s); await new Promise((r) => setTimeout(r, 8)); } return s.trim();
       };
     } else {
-      await brain.load(modelChoice, (p, txt) => { $('progBar').style.width = `${Math.round(p * 100)}%`; $('progTxt').textContent = txt.slice(0, 90); const ob = $('obProg'); if (ob) { ob.style.width = `${Math.round(p * 100)}%`; $('obTxt').textContent = txt.slice(0, 80); } });
+      await brain.load(modelChoice, showProgress);
     }
     store.set('jarvisBrainLoaded', '1');
     $('progTxt').textContent = 'Bereit.';
     say('Gehirn geladen. Ich laufe jetzt direkt auf deinem iPhone.');
   } catch (e) {
-    $('progTxt').textContent = 'Fehler: ' + (e.message || e);
-    $('reply').textContent = 'Das Gehirn konnte nicht geladen werden: ' + (e.message || e);
-  } finally { $('loadBrain').disabled = false; setBrainChip(); }
+    const msg = 'Das Gehirn konnte nicht geladen werden: ' + (e.message || e);
+    $('progTxt').textContent = msg;
+    $('reply').textContent = msg;
+    loading = false; setBrainChip();
+    const t = $('obTxt'); if (t) t.textContent = msg + ' – Tipp: Im Zahnrad „Schnell“ wählen und erneut versuchen.';
+    $('loadBrain').disabled = false;
+    return;
+  }
+  loading = false; $('loadBrain').disabled = false; setBrainChip();
 }
 function renderOnboarding() {
   const el = $('onboard');
   if (brain.ready) { el.innerHTML = ''; return; }
+  if (loading && $('obLoad')) return;
   const wasLoaded = store.get('jarvisBrainLoaded', '0') === '1';
   el.innerHTML = `<div class="onb"><b>${wasLoaded ? 'Gehirn starten' : 'Gehirn aufs iPhone laden'}</b><div class="muted" style="margin:6px 0 10px">${wasLoaded ? 'Das Modell liegt schon auf dem iPhone – Start dauert ein paar Sekunden.' : `${esc(MODELS[modelChoice].label)}. Einmaliger Download, danach läuft JARVIS ohne Internet und ohne Mac.`}</div>
     <button class="btn hot" id="obLoad" style="width:100%">${wasLoaded ? 'Starten' : 'Jetzt laden'}</button><div class="prog"><i id="obProg"></i></div><div id="obTxt" class="muted"></div></div>`;
-  $('obLoad').onclick = () => { unlockSpeech(); loadBrain(); };
+  const go = (e) => { if (e) e.preventDefault(); try { unlockSpeech(); } catch (err) {} loadBrain(); };
+  $('obLoad').addEventListener('click', go);
 }
 
 // ---------------------------------------------------------------- Mac link (optional)
@@ -391,6 +408,8 @@ $('closeSettings').onclick = () => { $('settings').hidden = true; };
 $('loadBrain').onclick = () => { unlockSpeech(); loadBrain(); };
 
 // ---------------------------------------------------------------- start
+window.addEventListener('error', (e) => { const r = $('reply'); if (r && !r.textContent) r.textContent = 'Fehler: ' + (e.message || e); });
+window.addEventListener('unhandledrejection', (e) => { const r = $('reply'); if (r) r.textContent = 'Fehler: ' + ((e.reason && e.reason.message) || e.reason); });
 if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 renderView('core', {});
 setBrainChip();

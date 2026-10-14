@@ -3,8 +3,8 @@
 // CDN-Module (WebLLM / wllama): cache-first, sie sind versioniert.
 // /api/* und Modell-Downloads (Hugging Face) werden nie angefasst –
 // WebLLM/wllama verwalten ihren Modell-Cache selbst.
-const SHELL = 'jarvis-shell-v16';
-const CDN = 'jarvis-cdn-v16';
+const SHELL = 'jarvis-shell-v17';
+const CDN = 'jarvis-cdn-v17';
 const SHELL_FILES = [
   './', 'index.html', 'app.js', 'brain.js', 'make.js', 'manifest.webmanifest',
   'icon.png', 'apple-touch-icon.png', 'Saira.ttf', 'JetBrainsMono.ttf',

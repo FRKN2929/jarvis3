@@ -172,6 +172,21 @@ pre.live { white-space: pre-wrap; font: 500 11px/1.45 var(--mono); color: var(--
   <div class="acts"><button class="btn" id="cfNo">Abbrechen</button><button class="btn hot" id="cfYes">Ausführen</button></div>
 </div></div>
 
+<script>
+/* Diagnose: zeigt Fehler sichtbar an, falls der App-Code auf diesem iPhone nicht startet */
+(function () {
+  function show(msg) {
+    var r = document.getElementById('reply');
+    if (r) { r.style.color = '#ff6b5a'; r.style.fontSize = '14px'; r.textContent = msg; }
+  }
+  window.addEventListener('error', function (e) {
+    if (!window.JARVIS_MOBILE) show('Startfehler: ' + (e.message || e) + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : ''));
+  }, true);
+  setTimeout(function () {
+    if (!window.JARVIS_MOBILE) show('JARVIS konnte nicht starten. Prüfe, ob alle 14 Dateien hochgeladen sind (app.js, brain.js, make.js …) und ob iOS aktuell ist. Bitte Screenshot an Claude schicken.');
+  }, 6000);
+})();
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -3,8 +3,8 @@
 import { stockSymbol, stock } from './make.js';
 
 export const WEBLLM_URL = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.85/+esm';
-export const WLLAMA_URL = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.9.0/esm/index.js';
-export const WLLAMA_WASM_URL = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.9.0/esm/wasm-from-cdn.js';
+export const WLLAMA_URL = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.8.1/esm/index.js';
+export const WLLAMA_WASM_URL = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.8.1/esm/wasm/wllama.wasm';
 
 export const MODELS = {
   fast: { label: 'Schnell · Qwen3 0.6B (~0,5 GB)', webllm: 'Qwen3-0.6B-q4f16_1-MLC', gguf: { repo: 'unsloth/Qwen3-0.6B-GGUF', file: 'Qwen3-0.6B-Q4_K_M.gguf' } },
@@ -21,28 +21,41 @@ export class Brain {
 
   async load(choice = 'smart', onProgress = () => {}) {
     const m = MODELS[choice] || MODELS.smart;
+    let gpuError = null;
     if (Brain.hasWebGPU()) {
       try {
+        onProgress(0.01, 'Prüfe Grafikchip …');
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) throw new Error('Kein GPU-Adapter');
+        const f16 = adapter.features && adapter.features.has('shader-f16');
+        onProgress(0.02, 'Lade KI-Engine (einmalig ca. 6 MB) …');
         const webllm = await import(WEBLLM_URL);
         const ids = (webllm.prebuiltAppConfig?.model_list || []).map((x) => x.model_id);
-        const id = ids.includes(m.webllm) ? m.webllm : (ids.find((x) => /^Qwen3-1\.7B-q4f16/.test(x)) || ids.find((x) => /^Qwen3.*q4f16/.test(x)) || m.webllm);
-        this.engine = await webllm.CreateMLCEngine(id, { initProgressCallback: (r) => onProgress(r.progress ?? 0, r.text || '') });
-        this.kind = 'webgpu'; this.model = id;
+        let want = f16 ? m.webllm : m.webllm.replace('q4f16_1', 'q4f32_1');
+        if (!ids.includes(want)) want = ids.includes(m.webllm) ? m.webllm : (ids.find((x) => /^Qwen3-1\.7B-q4f/.test(x)) || ids.find((x) => /^Qwen3.*q4f/.test(x)) || m.webllm);
+        onProgress(0.03, `Lade Modell ${want} …`);
+        this.engine = await webllm.CreateMLCEngine(want, { initProgressCallback: (r) => onProgress(Math.max(0.03, r.progress ?? 0), r.text || '') });
+        this.kind = 'webgpu'; this.model = want;
         return;
       } catch (e) {
+        gpuError = e;
         console.warn('WebLLM fehlgeschlagen, nutze CPU', e);
-        onProgress(0, 'GPU nicht nutzbar – lade CPU-Variante …');
+        onProgress(0, 'GPU nicht nutzbar (' + String(e.message || e).slice(0, 80) + ') – lade CPU-Variante …');
       }
     }
-    const { Wllama } = await import(WLLAMA_URL);
-    const cdn = (await import(WLLAMA_WASM_URL)).default;
-    const w = new Wllama(cdn);
-    await w.loadModelFromHF({ repo: m.gguf.repo, file: m.gguf.file }, {
-      n_ctx: 4096,
-      progressCallback: ({ loaded, total }) => onProgress(total ? loaded / total : 0, `Lade Modell … ${Math.round((loaded / 1048576))} MB`),
-    });
-    this.engine = { wllama: w };
-    this.kind = 'cpu'; this.model = m.gguf.file;
+    try {
+      onProgress(0.01, 'Lade KI-Engine (CPU) …');
+      const { Wllama } = await import(WLLAMA_URL);
+      const w = new Wllama({ default: WLLAMA_WASM_URL });
+      await w.loadModelFromHF({ repo: m.gguf.repo, file: m.gguf.file }, {
+        n_ctx: 4096,
+        progressCallback: ({ loaded, total }) => onProgress(total ? loaded / total : 0, `Lade Modell (CPU) … ${Math.round(loaded / 1048576)} von ${Math.round((total || 0) / 1048576)} MB`),
+      });
+      this.engine = { wllama: w };
+      this.kind = 'cpu'; this.model = m.gguf.file;
+    } catch (e) {
+      throw new Error((gpuError ? `GPU: ${gpuError.message || gpuError}. ` : '') + `CPU: ${e.message || e}`);
+    }
   }
 
   /** Streams an answer; returns the full text. */
