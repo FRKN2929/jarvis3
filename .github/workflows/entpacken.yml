@@ -1,0 +1,29 @@
+name: Zip entpacken
+on:
+  push:
+    paths: ['**.zip', '.github/workflows/entpacken.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Entpacken
+        run: |
+          shopt -s nullglob
+          for z in *.zip; do
+            unzip -o -j -q "$z" -x '__MACOSX/*' -d .
+            git rm -q "$z"
+          done
+          git config user.name "jarvis-bot"
+          git config user.email "jarvis-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Zip entpackt" || exit 0
+          git push
+      - name: Website neu bauen
+        run: gh api -X POST repos/${{ github.repository }}/pages/builds || true
+        env:
+          GH_TOKEN: ${{ github.token }}
